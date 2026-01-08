@@ -227,6 +227,7 @@ private fun SectionHeader(title: String, count: Int) {
     }
 }
 
+#goodjob
 @Composable
 private fun EmptyState(onClear: () -> Unit) {
     Column(
