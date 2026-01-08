@@ -1,0 +1,16 @@
+package com.example.dindon.model
+
+data class Alarm(
+    val id: Int,
+    val hour: Int,
+    val minute: Int,
+    val label: String,
+    val groupName: String,
+    val enabled: Boolean,
+    val days: Set<WeekDay> = emptySet(),
+
+    // NEW
+    val sound: String = "Default",
+    val snoozeMinutes: Int = 10,
+    val vibrate: Boolean = true
+)
