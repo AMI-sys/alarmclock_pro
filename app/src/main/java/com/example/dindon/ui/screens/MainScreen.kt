@@ -227,7 +227,6 @@ private fun SectionHeader(title: String, count: Int) {
     }
 }
 
-//metch
 @Composable
 private fun EmptyState(onClear: () -> Unit) {
     Column(
