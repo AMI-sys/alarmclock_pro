@@ -1,38 +1,19 @@
 package com.example.dindon.ui.screens
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.Card
-import androidx.compose.material.FabPosition
-import androidx.compose.material.FloatingActionButton
-import androidx.compose.material.Icon
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Scaffold
-import androidx.compose.material.Text
-import androidx.compose.material.TextButton
-import androidx.compose.material.TopAppBar
+import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.dindon.model.Alarm
 import com.example.dindon.model.WeekDay
-import com.example.dindon.ui.components.AlarmRow
-import com.example.dindon.ui.components.FiltersBar
-import com.example.dindon.ui.components.GroupRow
-import com.example.dindon.ui.components.ModeToggle
+import com.example.dindon.ui.components.*
+import com.example.dindon.ui.theme.Neu
 import com.example.dindon.viewmodel.AlarmViewModel
 import com.example.dindon.viewmodel.Mode
 
@@ -41,20 +22,28 @@ private const val NEW_ALARM_ID = -1
 @Composable
 fun MainScreen(vm: AlarmViewModel = viewModel()) {
 
-    // editId == null => list screen
-    // editId == -1   => create new
-    // else           => edit existing
     var editingId by remember { mutableStateOf<Int?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
+    var defaultVibrate by remember { mutableStateOf(true) } // пока заглушка
 
     val groupNames = vm.groups.map { it.name }
+
+    // ===== SETTINGS SCREEN =====
+    if (showSettings) {
+        SettingsScreen(
+            onBack = { showSettings = false },
+            vibrateByDefault = defaultVibrate,
+            onVibrateByDefaultChanged = { defaultVibrate = it }
+        )
+        return
+    }
 
     // ===== FULL SCREEN EDITOR =====
     if (editingId != null) {
         val initial = if (editingId == NEW_ALARM_ID) {
-            defaultNewAlarm(groupNames)
+            defaultNewAlarm(groupNames, defaultVibrate)
         } else {
             vm.alarms.firstOrNull { it.id == editingId } ?: run {
-                // если вдруг удалили будильник пока открыт
                 editingId = null
                 return
             }
@@ -74,34 +63,44 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
 
     // ===== LIST SCREEN =====
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Dindon Alarm") },
-                actions = {
-                    ModeToggle(
-                        mode = vm.mode,
-                        onModeChanged = vm::changeMode
-                    )
-                }
-            )
-        },
         floatingActionButtonPosition = FabPosition.End,
         floatingActionButton = {
             if (vm.mode == Mode.Custom) {
-                FloatingActionButton(onClick = { editingId = NEW_ALARM_ID }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add alarm")
+                NeuFab(onClick = { editingId = NEW_ALARM_ID }) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Add alarm",
+                        tint = Neu.onBg.copy(alpha = 0.9f)
+                    )
                 }
             }
         }
     ) { padding ->
 
-        when (vm.mode) {
-            Mode.Custom -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // ✅ Неоморфный заголовок вместо TopAppBar
+            NeuTopBar(
+                title = "Dindon Alarm",
+                onSettings = { showSettings = true }
+            )
+
+            // ✅ Segmented Control вместо ModeSwitcher
+            NeuSegmentedControl(
+                leftText = "Alarms",
+                rightText = "Groups",
+                selectedIndex = if (vm.mode == Mode.Group) 1 else 0,
+                onSelect = { index ->
+                    vm.changeMode(if (index == 1) Mode.Group else Mode.Custom)
+                },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+            )
+
+            when (vm.mode) {
+                Mode.Custom -> {
                     FiltersBar(
                         selectedDay = vm.selectedDay,
                         selectedGroup = vm.selectedGroup,
@@ -111,8 +110,8 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                         onReset = vm::resetFilters
                     )
 
-                    val sorted = vm.visibleAlarms.sortedWith(compareBy<Alarm>({ it.hour }, { it.minute }))
-
+                    val sorted = vm.visibleAlarms
+                        .sortedWith(compareBy<Alarm>({ it.hour }, { it.minute }))
                     val selectedDay = vm.selectedDay
                     val everyday = sorted.filter { it.days.isEmpty() }
 
@@ -125,6 +124,7 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                         else (everyday.isEmpty() && dayList.isEmpty())
 
                     if (nothingToShow) {
+                        // ✅ Компонент из ui/components/EmptyState.kt
                         EmptyState(onClear = vm::resetFilters)
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -135,7 +135,7 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                                     AlarmRow(
                                         alarm = alarm,
                                         onToggle = vm::toggleAlarm,
-                                        onEdit = { id -> editingId = id }, // ✅ тап по карточке
+                                        onEdit = { id -> editingId = id },
                                         onDelete = vm::deleteAlarm
                                     )
                                 }
@@ -174,16 +174,13 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                         }
                     }
                 }
-            }
 
-            Mode.Group -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
-                    items(vm.groups, key = { it.id }) { group ->
-                        GroupRow(group = group, onToggleGroup = vm::toggleGroup)
+                Mode.Group -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(vm.groups, key = { it.id }) { group ->
+                            GroupRow(group = group, onToggleGroup = vm::toggleGroup)
+                        }
+                        item { Spacer(Modifier.height(24.dp)) }
                     }
                 }
             }
@@ -191,53 +188,18 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
     }
 }
 
-private fun defaultNewAlarm(groupSuggestions: List<String>): Alarm {
+private fun defaultNewAlarm(groupSuggestions: List<String>, defaultVibrate: Boolean): Alarm {
     val group = groupSuggestions.firstOrNull() ?: "Default"
-
     return Alarm(
-        id = NEW_ALARM_ID, // будет заменён в createAlarm()
+        id = NEW_ALARM_ID,
         hour = 7,
         minute = 0,
         label = "",
         groupName = group,
         enabled = true,
         days = emptySet(),
-
-        // новые настройки
         sound = "Default",
         snoozeMinutes = 10,
-        vibrate = true
+        vibrate = defaultVibrate
     )
-}
-
-@Composable
-private fun SectionHeader(title: String, count: Int) {
-    Card(
-        elevation = 0.dp,
-        backgroundColor = MaterialTheme.colors.surface.copy(alpha = 0.92f),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Text(
-            text = "$title  •  $count",
-            style = MaterialTheme.typography.subtitle2,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-        )
-    }
-}
-
-@Composable
-private fun EmptyState(onClear: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(24.dp)
-    ) {
-        Text("No alarms found", style = MaterialTheme.typography.h6)
-        Spacer(Modifier.height(8.dp))
-        Text("Try changing filters or create a new alarm.", style = MaterialTheme.typography.body2)
-        Spacer(Modifier.height(12.dp))
-        TextButton(onClick = onClear) { Text("Clear filters") }
-    }
 }
