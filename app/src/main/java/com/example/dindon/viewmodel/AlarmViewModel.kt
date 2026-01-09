@@ -1,37 +1,37 @@
 package com.example.dindon.viewmodel
 
+import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
+import com.example.dindon.alarm.AlarmScheduler
+import com.example.dindon.data.AlarmStore
 import com.example.dindon.model.Alarm
 import com.example.dindon.model.AlarmGroup
 import com.example.dindon.model.WeekDay
 
 enum class Mode { Custom, Group }
 
-class AlarmViewModel : ViewModel() {
+class AlarmViewModel(app: Application) : AndroidViewModel(app) {
 
-    // Режим экрана
+    private val store = AlarmStore(app)
+
     var mode by mutableStateOf(Mode.Custom)
         private set
 
-    // Будильники (пока заглушки)
-    var alarms by mutableStateOf(sampleAlarms())
+    var alarms by mutableStateOf(loadInitial())
         private set
 
-    // Группы (считаются из alarms)
     var groups by mutableStateOf(buildGroups(alarms))
         private set
 
-    // Фильтры (null = All)
     var selectedDay by mutableStateOf<WeekDay?>(null)
         private set
 
     var selectedGroup by mutableStateOf<String?>(null)
         private set
 
-    // Список для отображения (результат фильтров)
     val visibleAlarms: List<Alarm>
         get() = applyFilters(alarms, selectedDay, selectedGroup)
 
@@ -39,17 +39,45 @@ class AlarmViewModel : ViewModel() {
         mode = newMode
     }
 
+    /**
+     * Включение/выключение одного будильника:
+     * - enabled=true  -> schedule
+     * - enabled=false -> cancel
+     */
     fun toggleAlarm(alarmId: Int, enabled: Boolean) {
-        alarms = alarms.map { a -> if (a.id == alarmId) a.copy(enabled = enabled) else a }
-        recalcGroupsAndFixFilters()
+        val updated = alarms.map { a ->
+            if (a.id == alarmId) a.copy(enabled = enabled) else a
+        }
+        setAndPersist(updated)
+
+        val alarm = updated.firstOrNull { it.id == alarmId } ?: return
+
+        if (enabled) {
+            AlarmScheduler.schedule(getApplication(), alarm)
+        } else {
+            AlarmScheduler.cancel(getApplication(), alarm.id)
+        }
     }
 
+    /**
+     * Включение/выключение всей группы:
+     * - enabled=true  -> schedule для каждого
+     * - enabled=false -> cancel для каждого
+     */
     fun toggleGroup(groupId: Int, enabled: Boolean) {
         val groupName = groups.firstOrNull { it.id == groupId }?.name ?: return
-        alarms = alarms.map { a ->
+
+        val updated = alarms.map { a ->
             if (a.groupName == groupName) a.copy(enabled = enabled) else a
         }
-        recalcGroupsAndFixFilters()
+        setAndPersist(updated)
+
+        val affected = updated.filter { it.groupName == groupName }
+        if (enabled) {
+            affected.forEach { AlarmScheduler.schedule(getApplication(), it) }
+        } else {
+            affected.forEach { AlarmScheduler.cancel(getApplication(), it.id) }
+        }
     }
 
     fun setDayFilter(day: WeekDay?) {
@@ -66,32 +94,71 @@ class AlarmViewModel : ViewModel() {
     }
 
     fun deleteAlarm(alarmId: Int) {
-        alarms = alarms.filterNot { it.id == alarmId }
-        recalcGroupsAndFixFilters()
+        AlarmScheduler.cancel(getApplication(), alarmId)
+        val updated = alarms.filterNot { it.id == alarmId }
+        setAndPersist(updated)
     }
 
+    /**
+     * Обновление будильника:
+     * - если enabled=true -> schedule
+     * - если enabled=false -> cancel
+     */
     fun updateAlarm(updated: Alarm) {
-        // нормализуем группу (чтобы не было пустых и пробельных)
         val fixed = updated.copy(groupName = normalizeGroupName(updated.groupName))
-        alarms = alarms.map { a -> if (a.id == fixed.id) fixed else a }
-        recalcGroupsAndFixFilters()
+        val list = alarms.map { a -> if (a.id == fixed.id) fixed else a }
+        setAndPersist(list)
+
+        if (fixed.enabled) {
+            AlarmScheduler.schedule(getApplication(), fixed)
+        } else {
+            AlarmScheduler.cancel(getApplication(), fixed.id)
+        }
     }
 
+    /**
+     * Создание будильника:
+     * - если enabled=true -> schedule
+     * - если enabled=false -> просто сохраняем
+     */
     fun createAlarm(newAlarm: Alarm) {
         val fixed = newAlarm.copy(
             id = nextId(),
             groupName = normalizeGroupName(newAlarm.groupName)
         )
-        alarms = alarms + fixed
+        val list = alarms + fixed
+        setAndPersist(list)
+
+        if (fixed.enabled) {
+            AlarmScheduler.schedule(getApplication(), fixed)
+        }
+    }
+
+    private fun setAndPersist(list: List<Alarm>) {
+        alarms = list
+        store.setAlarms(list)
         recalcGroupsAndFixFilters()
     }
 
-    // ===== Helpers =====
+    private fun loadInitial(): List<Alarm> {
+        val stored = store.getAlarms()
+        if (stored.isNotEmpty()) {
+            // На всякий случай при старте пересоздадим расписание только для enabled=true
+            stored.filter { it.enabled }.forEach { AlarmScheduler.schedule(getApplication(), it) }
+            return stored
+        }
+
+        // если первый запуск — создадим пару примеров, но уже в Store
+        val demo = sampleAlarms()
+        store.setAlarms(demo)
+
+        // и сразу запланируем включенные
+        demo.filter { it.enabled }.forEach { AlarmScheduler.schedule(getApplication(), it) }
+        return demo
+    }
 
     private fun recalcGroupsAndFixFilters() {
         groups = buildGroups(alarms)
-
-        // если выбранная группа больше не существует — сбросим фильтр группы
         val existing = groups.map { it.name }.toSet()
         if (selectedGroup != null && selectedGroup !in existing) {
             selectedGroup = null
@@ -115,47 +182,17 @@ private fun sampleAlarms(): List<Alarm> = listOf(
         groupName = "Work",
         enabled = true,
         days = setOf(WeekDay.Mon, WeekDay.Tue, WeekDay.Wed, WeekDay.Thu, WeekDay.Fri),
-        sound = "Default",
+        sound = "default",
         snoozeMinutes = 10,
         vibrate = true
     ),
     Alarm(
-        id = 2, hour = 8, minute = 0,
-        label = "Запасной",
-        groupName = "Work",
-        enabled = false,
-        days = setOf(WeekDay.Mon, WeekDay.Wed, WeekDay.Fri),
-        sound = "Soft",
-        snoozeMinutes = 5,
-        vibrate = true
-    ),
-    Alarm(
-        id = 3, hour = 18, minute = 15,
-        label = "Зал",
-        groupName = "Gym",
-        enabled = true,
-        days = setOf(WeekDay.Tue, WeekDay.Thu, WeekDay.Sat),
-        sound = "Loud",
-        snoozeMinutes = 10,
-        vibrate = false
-    ),
-    Alarm(
-        id = 4, hour = 10, minute = 0,
-        label = "Выходной",
-        groupName = "Weekend",
-        enabled = false,
-        days = setOf(WeekDay.Sat, WeekDay.Sun),
-        sound = "Default",
-        snoozeMinutes = 15,
-        vibrate = true
-    ),
-    Alarm(
-        id = 5, hour = 9, minute = 0,
+        id = 2, hour = 9, minute = 0,
         label = "Каждый день",
         groupName = "Any",
         enabled = true,
         days = emptySet(), // пусто = каждый день
-        sound = "Digital",
+        sound = "default",
         snoozeMinutes = 10,
         vibrate = true
     )
@@ -183,14 +220,7 @@ private fun applyFilters(
 ): List<Alarm> {
     return alarms.filter { alarm ->
         val groupOk = groupName == null || alarm.groupName == groupName
-
-        val dayOk = if (day == null) {
-            true
-        } else {
-            // emptySet = каждый день
-            alarm.days.isEmpty() || alarm.days.contains(day)
-        }
-
+        val dayOk = if (day == null) true else alarm.days.isEmpty() || alarm.days.contains(day)
         groupOk && dayOk
     }
 }
