@@ -20,6 +20,12 @@ class AlarmForegroundService : Service() {
 
     private var player: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private val fadeDurationMs = 10_000L
+    private val fadeStepMs = 100L
+    private var fadeRunnable: Runnable? = null
+    private var reachedFullVolume = false
+    private val handler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -41,20 +47,6 @@ class AlarmForegroundService : Service() {
                 )
                 startRing(soundId)
 
-                startActivity(
-                    Intent(this, AlarmRingActivity::class.java).apply {
-                        addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                    Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        )
-                        putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
-                        putExtra(AlarmActions.EXTRA_LABEL, label)
-                        putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
-                        putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
-                        putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
-                    }
-                )
             }
 
             AlarmActions.ACTION_DISMISS -> {
@@ -142,7 +134,7 @@ class AlarmForegroundService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setFullScreenIntent(fullScreenIntent, true)
+            .setFullScreenIntent(fullScreenIntent, shouldUseFullScreen())
             .addAction(0, "Snooze", snoozePi)
             .addAction(0, "Dismiss", dismissPi)
             .build()
@@ -150,43 +142,91 @@ class AlarmForegroundService : Service() {
 
     private fun startRing(soundId: String) {
         stopRing()
+        reachedFullVolume = false
 
-        // Твой готовый метод, который всегда вернёт валидный звук (или первый в списке)
         val sound = AlarmSounds.byId(soundId)
         val resId = sound.resId
 
-        val mp = MediaPlayer.create(this, resId) ?: return
+        val afd = resources.openRawResourceFd(resId) ?: return
+
+        val mp = MediaPlayer().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+
+            setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+
+            isLooping = true
+
+            // стартуем с нуля, дальше поднимем
+            setVolume(0f, 0f)
+
+            prepare()
+            start()
+        }
+
         player = mp
 
-        mp.isLooping = true
-        mp.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build()
-        )
-        mp.start()
+        mp.setOnErrorListener { _, _, _ ->
+            // пересоздаём плеер и продолжаем играть, сервис не падает
+            val lastSoundId = soundId
+            handler.post {
+                startRing(lastSoundId)
+                if (reachedFullVolume) {
+                    player?.setVolume(1f, 1f)
+                }
+            }
+            true
+        }
+
+        startFadeIn()
     }
 
+
     private fun stopRing() {
+        cancelFade()
+        reachedFullVolume = false
+
         player?.runCatching {
+            setOnCompletionListener(null)
+            setOnErrorListener(null)
             stop()
             release()
         }
         player = null
     }
 
+    private fun shouldUseFullScreen(): Boolean {
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        return km.isKeyguardLocked
+    }
+
+
     private fun stopEverything() {
         stopRing()
         releaseWakeLock()
-        stopForeground(true)
+        stopForegroundCompat()
     }
+
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+    }
+
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            PowerManager.PARTIAL_WAKE_LOCK,
             "dindon:alarm_wakelock"
         ).apply {
             acquire(10 * 60 * 1000L) // максимум 10 минут
@@ -210,6 +250,43 @@ class AlarmForegroundService : Service() {
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
         nm.createNotificationChannel(ch)
+    }
+
+    private fun startFadeIn() {
+        cancelFade()
+
+        val mp = player ?: return
+        val steps = (fadeDurationMs / fadeStepMs).toInt().coerceAtLeast(1)
+        var i = 0
+
+        fadeRunnable = object : Runnable {
+            override fun run() {
+                val p = player
+                if (p == null) {
+                    cancelFade()
+                    return
+                }
+
+                i++
+                val vol = (i.toFloat() / steps.toFloat()).coerceIn(0f, 1f)
+                p.setVolume(vol, vol)
+
+                if (vol >= 1f) {
+                    reachedFullVolume = true
+                    player?.setVolume(1f, 1f) // фиксируем
+                    cancelFade()
+                } else {
+                    handler.postDelayed(this, fadeStepMs)
+                }
+            }
+        }
+
+        handler.post(fadeRunnable!!)
+    }
+
+    private fun cancelFade() {
+        fadeRunnable?.let { handler.removeCallbacks(it) }
+        fadeRunnable = null
     }
 
     companion object {

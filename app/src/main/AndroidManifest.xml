@@ -2,15 +2,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Для точных будильников (Android 12+) -->
+    <!-- Exact alarms (Android 12+) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- Для вывода full-screen и проигрывания в фоне -->
+
+    <!-- Wake / foreground -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Android 14+: явно разрешаем mediaPlayback foreground -->
+
+    <!-- Android 14+: mediaPlayback foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <!-- Android 13+: нотификации -->
+
+    <!-- Android 13+: notifications (нужно запрашивать в рантайме) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Full-screen intent для уведомлений будильника -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!-- Перезагрузка: пересоздаём будильники -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -21,8 +30,9 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Dindon"
-        tools:targetApi="31">
+        tools:targetApi="34">
 
+        <!-- Launcher -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -34,7 +44,7 @@
             </intent-filter>
         </activity>
 
-        <!-- FULLSCREEN экран будильника -->
+        <!-- Fullscreen экран будильника -->
         <activity
             android:name=".alarm.AlarmRingActivity"
             android:exported="false"
@@ -48,7 +58,19 @@
         <!-- Receiver, который получает сигнал от AlarmManager -->
         <receiver
             android:name=".alarm.AlarmReceiver"
-            android:exported="false" />
+            android:exported="true" />
+
+        <!-- Receiver для ребута/смены времени -->
+        <receiver
+            android:name=".alarm.AlarmBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!-- ForegroundService, который держит звук/вибро и открывает fullscreen -->
         <service

@@ -1,5 +1,6 @@
 package com.example.dindon.alarm
 
+import android.app.KeyguardManager
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -33,9 +34,15 @@ class AlarmRingActivity : ComponentActivity() {
             )
         }
 
+        // Попросим убрать keyguard (лучше работает на части устройств)
+        val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            km.requestDismissKeyguard(this, null)
+        }
+
         val alarmId = intent.getIntExtra(AlarmActions.EXTRA_ALARM_ID, -1)
         val label = intent.getStringExtra(AlarmActions.EXTRA_LABEL) ?: "Alarm"
-        val soundId = intent.getStringExtra(AlarmActions.EXTRA_SOUND_ID) ?: "clock"
+        val soundId = intent.getStringExtra(AlarmActions.EXTRA_SOUND_ID) ?: "american"
         val vibrate = intent.getBooleanExtra(AlarmActions.EXTRA_VIBRATE, true)
         val snoozeMin = intent.getIntExtra(AlarmActions.EXTRA_SNOOZE_MIN, 5)
 
@@ -44,9 +51,7 @@ class AlarmRingActivity : ComponentActivity() {
                 AlarmRingScreen(
                     label = label,
                     onDismiss = {
-                        startForegroundService(
-                            AlarmForegroundServiceIntent.dismiss(this@AlarmRingActivity)
-                        )
+                        startForegroundService(AlarmForegroundServiceIntent.dismiss(this@AlarmRingActivity, alarmId))
                         finish()
                     },
                     onSnooze = {
@@ -64,9 +69,10 @@ class AlarmRingActivity : ComponentActivity() {
     }
 
     private object AlarmForegroundServiceIntent {
-        fun dismiss(context: android.content.Context) =
+        fun dismiss(context: android.content.Context, alarmId: Int) =
             android.content.Intent(context, AlarmForegroundService::class.java).apply {
                 action = AlarmActions.ACTION_DISMISS
+                putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
             }
 
         fun snooze(
