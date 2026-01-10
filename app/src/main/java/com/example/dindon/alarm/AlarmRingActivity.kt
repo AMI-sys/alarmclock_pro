@@ -4,6 +4,7 @@ import android.app.KeyguardManager
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -41,16 +42,18 @@ class AlarmRingActivity : ComponentActivity() {
             )
         }
 
-        val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            km.requestDismissKeyguard(this, null)
-        }
+        // val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        //    km.requestDismissKeyguard(this, null)
+        // }
 
         val alarmId = intent.getIntExtra(AlarmActions.EXTRA_ALARM_ID, -1)
         val label = intent.getStringExtra(AlarmActions.EXTRA_LABEL) ?: "Будильник"
         val soundId = intent.getStringExtra(AlarmActions.EXTRA_SOUND_ID) ?: "american"
         val vibrate = intent.getBooleanExtra(AlarmActions.EXTRA_VIBRATE, true)
         val snoozeMin = intent.getIntExtra(AlarmActions.EXTRA_SNOOZE_MIN, 5)
+        val vibPattern =
+            intent.getStringExtra(AlarmActions.EXTRA_VIBRATION_PATTERN) ?: "pulse"
 
         setContent {
             DindonTheme {
@@ -64,7 +67,7 @@ class AlarmRingActivity : ComponentActivity() {
                         startForegroundService(
                             AlarmForegroundServiceIntent.snooze(
                                 this@AlarmRingActivity,
-                                alarmId, label, soundId, vibrate, snoozeMin
+                                alarmId, label, soundId, vibrate, snoozeMin, vibPattern
                             )
                         )
                         finish()
@@ -82,12 +85,13 @@ class AlarmRingActivity : ComponentActivity() {
             }
 
         fun snooze(
-            context: android.content.Context,
+            context: Context,
             alarmId: Int,
             label: String,
             soundId: String,
             vibrate: Boolean,
-            snoozeMin: Int
+            snoozeMin: Int,
+            vibPattern: String
         ) =
             android.content.Intent(context, AlarmForegroundService::class.java).apply {
                 action = AlarmActions.ACTION_SNOOZE
@@ -95,6 +99,7 @@ class AlarmRingActivity : ComponentActivity() {
                 putExtra(AlarmActions.EXTRA_LABEL, label)
                 putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                 putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                 putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
             }
     }

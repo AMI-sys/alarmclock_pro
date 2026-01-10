@@ -36,6 +36,7 @@ class AlarmStore(context: Context) {
         o.put("groupName", a.groupName)
         o.put("enabled", a.enabled)
         o.put("sound", a.sound)
+        o.put("vibrationPattern", a.vibrationPattern)
         o.put("snoozeMinutes", a.snoozeMinutes)
         o.put("vibrate", a.vibrate)
 
@@ -61,6 +62,7 @@ class AlarmStore(context: Context) {
             enabled = o.optBoolean("enabled", true),
             days = days,
             sound = o.optString("sound", "default"),
+            vibrationPattern = o.optString("vibrationPattern", "pulse"),
             snoozeMinutes = o.optInt("snoozeMinutes", 10),
             vibrate = o.optBoolean("vibrate", true)
         )

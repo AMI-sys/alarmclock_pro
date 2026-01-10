@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import com.example.dindon.model.Alarm
 import com.example.dindon.model.WeekDay
 import java.util.Calendar
@@ -21,7 +20,8 @@ object AlarmScheduler {
             label = alarm.label,
             soundId = alarm.sound,
             vibrate = alarm.vibrate,
-            snoozeMin = alarm.snoozeMinutes
+            snoozeMin = alarm.snoozeMinutes,
+            vibPattern = alarm.vibrationPattern
         )
 
         // showIntent — то, что система покажет пользователю при тапе по "следующему будильнику"
@@ -31,15 +31,15 @@ object AlarmScheduler {
             label = alarm.label,
             soundId = alarm.sound,
             vibrate = alarm.vibrate,
-            snoozeMin = alarm.snoozeMinutes
+            snoozeMin = alarm.snoozeMinutes,
+            vibPattern = alarm.vibrationPattern
         )
 
-        // "Системный" будильник
         val info = AlarmManager.AlarmClockInfo(triggerAt, showPi)
         try {
             am.setAlarmClock(info, triggerPi)
         } catch (_: SecurityException) {
-            // На некоторых прошивках может быть капризно — fallback
+            // fallback для прошивок/разрешений
             setExactFallback(am, triggerAt, triggerPi)
         }
     }
@@ -47,7 +47,18 @@ object AlarmScheduler {
     fun cancel(context: Context, alarmId: Int) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-        val mainPi = buildTriggerPendingIntent(context, alarmId, "", "", vibrate = false, snoozeMin = 5)
+        // В cancel мы не знаем параметры (sound/vibrate/pattern) — поэтому используем дефолты.
+        // Важно: requestCode должен совпадать с тем, что использовался в schedule/snooze/show.
+
+        val mainPi = buildTriggerPendingIntent(
+            context = context,
+            alarmId = alarmId,
+            label = "",
+            soundId = "",
+            vibrate = false,
+            snoozeMin = 5
+            // vibPattern default = "pulse"
+        )
         am.cancel(mainPi)
 
         val snoozePi = buildSnoozePendingIntent(
@@ -58,6 +69,7 @@ object AlarmScheduler {
             vibrate = false,
             snoozeMin = 5,
             triggerAt = 0L
+            // vibPattern default = "pulse"
         )
         am.cancel(snoozePi)
 
@@ -68,6 +80,7 @@ object AlarmScheduler {
             soundId = "",
             vibrate = false,
             snoozeMin = 5
+            // vibPattern default = "pulse"
         )
         am.cancel(showPi)
     }
@@ -77,33 +90,39 @@ object AlarmScheduler {
         alarms.forEach { schedule(context, it) }
     }
 
-    fun snooze(context: Context, alarmId: Int, label: String, soundId: String, vibrate: Boolean, snoozeMin: Int) {
-        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    fun snooze(
+        context: Context,
+        alarmId: Int,
+        label: String,
+        soundId: String,
+        vibrate: Boolean,
+        snoozeMin: Int,
+        vibPattern: String = "pulse"
+    ) {
         val triggerAt = System.currentTimeMillis() + snoozeMin * 60_000L
 
-        val pi = buildSnoozePendingIntent(
+        val snoozePi = buildSnoozePendingIntent(
             context = context,
             alarmId = alarmId,
             label = label,
             soundId = soundId,
             vibrate = vibrate,
             snoozeMin = snoozeMin,
-            triggerAt = triggerAt
+            triggerAt = triggerAt,
+            vibPattern = vibPattern
         )
 
-        // snooze можно оставить exact-ish
-        setExactFallback(am, triggerAt, pi)
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, snoozePi)
     }
 
     private fun setExactFallback(am: AlarmManager, triggerAt: Long, pi: PendingIntent) {
         try {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
         } catch (_: SecurityException) {
-            // если у приложения нет права на exact alarms — хотя бы приблизительно
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
         }
     }
-
 
     private fun buildTriggerPendingIntent(
         context: Context,
@@ -111,7 +130,8 @@ object AlarmScheduler {
         label: String,
         soundId: String,
         vibrate: Boolean,
-        snoozeMin: Int
+        snoozeMin: Int,
+        vibPattern: String = "pulse"
     ): PendingIntent {
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             action = AlarmActions.ACTION_TRIGGER
@@ -119,6 +139,7 @@ object AlarmScheduler {
             putExtra(AlarmActions.EXTRA_LABEL, label)
             putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
             putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+            putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
             putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
         }
 
@@ -136,7 +157,8 @@ object AlarmScheduler {
         label: String,
         soundId: String,
         vibrate: Boolean,
-        snoozeMin: Int
+        snoozeMin: Int,
+        vibPattern: String = "pulse"
     ): PendingIntent {
         val intent = Intent(context, AlarmRingActivity::class.java).apply {
             addFlags(
@@ -148,6 +170,7 @@ object AlarmScheduler {
             putExtra(AlarmActions.EXTRA_LABEL, label)
             putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
             putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+            putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
             putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
         }
 
@@ -169,7 +192,8 @@ object AlarmScheduler {
         soundId: String,
         vibrate: Boolean,
         snoozeMin: Int,
-        triggerAt: Long
+        triggerAt: Long,
+        vibPattern: String = "pulse"
     ): PendingIntent {
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             action = AlarmActions.ACTION_TRIGGER
@@ -178,13 +202,12 @@ object AlarmScheduler {
             putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
             putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
             putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
-            putExtra(AlarmActions.EXTRA_TRIGGER_AT, triggerAt)
+            putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
         }
 
-        val requestCode = alarmId + 1_000_000
         return PendingIntent.getBroadcast(
             context,
-            requestCode,
+            alarmId * 10 + 2,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

@@ -17,6 +17,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val soundId = intent.getStringExtra(AlarmActions.EXTRA_SOUND_ID) ?: "american"
         val vibrate = intent.getBooleanExtra(AlarmActions.EXTRA_VIBRATE, true)
         val snoozeMin = intent.getIntExtra(AlarmActions.EXTRA_SNOOZE_MIN, 5)
+        val vibPattern = intent.getStringExtra(AlarmActions.EXTRA_VIBRATION_PATTERN) ?: "pulse"
 
         when (act) {
             AlarmActions.ACTION_TRIGGER -> {
@@ -32,6 +33,7 @@ class AlarmReceiver : BroadcastReceiver() {
                     putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                     putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
                     putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
+                    putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                 }
                 try {
                     context.startForegroundService(serviceIntent)
@@ -48,6 +50,7 @@ class AlarmReceiver : BroadcastReceiver() {
                         putExtra(AlarmActions.EXTRA_LABEL, label)
                         putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                         putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                        putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                         putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
                     }
                     context.startActivity(uiIntent)
@@ -74,6 +77,7 @@ class AlarmReceiver : BroadcastReceiver() {
                         putExtra(AlarmActions.EXTRA_LABEL, label)
                         putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                         putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                        putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                         putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
                     }
                     context.startActivity(uiIntent)
@@ -95,6 +99,7 @@ class AlarmReceiver : BroadcastReceiver() {
                     putExtra(AlarmActions.EXTRA_LABEL, label)
                     putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                     putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                    putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                     putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
                 }
                 context.startForegroundService(s)

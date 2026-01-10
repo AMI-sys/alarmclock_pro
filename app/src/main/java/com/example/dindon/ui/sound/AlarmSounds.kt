@@ -3,6 +3,8 @@ package com.example.dindon.ui.sound
 import com.example.dindon.R
 
 object AlarmSounds {
+
+    const val NONE_ID = "none"
     data class Sound(val id: String, val title: String, val resId: Int? = null)
 
     private val builtIn = listOf(
@@ -20,12 +22,14 @@ object AlarmSounds {
         val trimmed = id.trim()
         return when (trimmed.lowercase()) {
             "default" -> "american"
+            NONE_ID -> NONE_ID
             else -> trimmed
         }
     }
 
     fun byId(id: String): Sound? {
         val norm = normalizeId(id)
+        if (norm == NONE_ID) return null
         return builtIn.find { it.id == norm }
             ?: customSounds[norm]?.let { Sound(norm, it, null) }
     }

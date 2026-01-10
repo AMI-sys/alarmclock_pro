@@ -57,7 +57,8 @@ class AlarmForegroundService : Service() {
         }
     }
 
-    private val fadeDurationMs = 10_000L
+    // громкость (постепенная)
+    private val fadeDurationMs = 15_000L
     private val fadeStepMs = 100L
     private var fadeRunnable: Runnable? = null
     private var reachedFullVolume = false
@@ -68,6 +69,7 @@ class AlarmForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: return START_NOT_STICKY
+        val vibPattern = intent.getStringExtra(AlarmActions.EXTRA_VIBRATION_PATTERN) ?: "pulse"
 
         when (action) {
 
@@ -93,6 +95,7 @@ class AlarmForegroundService : Service() {
                     putExtra(AlarmActions.EXTRA_LABEL, label)
                     putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                     putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                    putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                     putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
                 }
 
@@ -114,6 +117,7 @@ class AlarmForegroundService : Service() {
                         soundId = soundId,
                         vibrate = vibrate,
                         snoozeMin = snoozeMin,
+                        vibPattern = vibPattern,
                         useFullScreen = useFullScreen,
                         fullScreenIntent = fullScreenPi
                     )
@@ -124,7 +128,7 @@ class AlarmForegroundService : Service() {
                 }
 
                 startRing(soundId)
-                if (vibrate) startVibration()
+                if (vibrate) startVibration(vibPattern)
             }
 
             AlarmActions.ACTION_DISMISS -> {
@@ -140,7 +144,7 @@ class AlarmForegroundService : Service() {
                 val snoozeMin = intent.getIntExtra(AlarmActions.EXTRA_SNOOZE_MIN, 5)
 
                 stopEverything()
-                AlarmScheduler.snooze(this, alarmId, label, soundId, vibrate, snoozeMin)
+                AlarmScheduler.snooze(this, alarmId, label, soundId, vibrate, snoozeMin, vibPattern)
                 stopSelf()
             }
 
@@ -163,6 +167,7 @@ class AlarmForegroundService : Service() {
         label: String,
         soundId: String,
         vibrate: Boolean,
+        vibPattern: String,
         snoozeMin: Int,
         useFullScreen: Boolean,
         fullScreenIntent: PendingIntent
@@ -175,6 +180,7 @@ class AlarmForegroundService : Service() {
             Intent(this, AlarmForegroundService::class.java).apply {
                 action = AlarmActions.ACTION_DISMISS
                 putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
+                putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -188,6 +194,7 @@ class AlarmForegroundService : Service() {
                 putExtra(AlarmActions.EXTRA_LABEL, label)
                 putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
                 putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                putExtra(AlarmActions.EXTRA_VIBRATION_PATTERN, vibPattern)
                 putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -213,6 +220,11 @@ class AlarmForegroundService : Service() {
         stopRing()
         reachedFullVolume = false
 
+        if (soundId.trim().equals(AlarmSounds.NONE_ID, ignoreCase = true)) {
+            // звук отключён — ничего не запускаем
+            return
+        }
+
         val focusGranted = requestAlarmAudioFocus()
         android.util.Log.d("AlarmFG", "Audio focus granted=$focusGranted")
 
@@ -233,13 +245,19 @@ class AlarmForegroundService : Service() {
 
                 prepare()
                 start()
-                startFadeIn()     // теперь player уже не null
+
+                // важно: на некоторых прошивках громкость "слетает" после start()
+                setVolume(0f, 0f)
+
+                // небольшая задержка, чтобы гарантированно применилось
+                handler.postDelayed({ startFadeIn() }, 150L)
             } else {
                 val uri = Uri.parse(sound.id)
                 setDataSource(applicationContext, uri)
-                setOnPreparedListener {
-                    it.start()
-                    startFadeIn()
+                setOnPreparedListener { p ->
+                    p.start()
+                    p.setVolume(0f, 0f)
+                    handler.postDelayed({ startFadeIn() }, 150L)
                 }
                 prepareAsync()
             }
@@ -383,6 +401,8 @@ class AlarmForegroundService : Service() {
         cancelFade()
 
         val mp = player ?: return
+        mp.setVolume(0f, 0f)
+
         val steps = (fadeDurationMs / fadeStepMs).toInt().coerceAtLeast(1)
         var i = 0
 
@@ -416,6 +436,15 @@ class AlarmForegroundService : Service() {
         fadeRunnable = null
     }
 
+    private fun vibrationWaveform(pattern: String): LongArray = when (pattern) {
+        "short" -> longArrayOf(0, 200, 800) // repeat будет 0, но тут по сути одиночный
+        "long" -> longArrayOf(0, 700, 800)
+        "heartbeat" -> longArrayOf(0, 120, 120, 260, 900)
+        "pulse" -> longArrayOf(0, 300, 300, 300, 700)
+        "ramp" -> longArrayOf(0, 120, 250, 180, 220, 260, 180, 320, 160, 500)
+        else -> longArrayOf(0, 300, 300, 300, 700)
+    }
+
     private fun getVibrator(): Vibrator {
         vibrator?.let { return it }
         val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -429,22 +458,23 @@ class AlarmForegroundService : Service() {
         return v
     }
 
-    private fun startVibration() {
+    private fun startVibration(pattern: String) {
         val v = getVibrator()
         if (!v.hasVibrator()) return
 
+        val timings = vibrationWaveform(pattern)
+
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val timings = longArrayOf(0, 800, 400, 800)
-                val amplitudes = intArrayOf(0, 255, 0, 255)
-                val effect = VibrationEffect.createWaveform(timings, amplitudes, 0)
+                val effect = VibrationEffect.createWaveform(timings, 0)
                 v.vibrate(effect)
             } else {
                 @Suppress("DEPRECATION")
-                v.vibrate(longArrayOf(0, 800, 400, 800), 0)
+                v.vibrate(timings, 0)
             }
         }
     }
+
 
 
     private fun stopVibration() {

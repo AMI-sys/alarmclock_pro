@@ -9,8 +9,9 @@ data class Alarm(
     val enabled: Boolean,
     val days: Set<WeekDay> = emptySet(),
 
-    // NEW
+
     val sound: String = "american",
     val snoozeMinutes: Int = 10,
-    val vibrate: Boolean = true
+    val vibrate: Boolean = true,
+    val vibrationPattern: String = "pulse"
 )

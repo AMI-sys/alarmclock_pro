@@ -11,4 +11,7 @@ object AlarmActions {
     const val EXTRA_VIBRATE = "extra_vibrate"
     const val EXTRA_SNOOZE_MIN = "extra_snooze_min"
     const val EXTRA_TRIGGER_AT = "extra_trigger_at" // для snooze one-shot
+
+    const val EXTRA_VIBRATION_PATTERN = "extra_vibration_pattern"
+
 }

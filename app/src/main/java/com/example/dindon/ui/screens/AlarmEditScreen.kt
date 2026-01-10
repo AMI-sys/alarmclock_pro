@@ -33,6 +33,7 @@ import com.example.dindon.model.Alarm
 import com.example.dindon.model.WeekDay
 import com.example.dindon.ui.components.*
 import com.example.dindon.ui.sound.AlarmSounds
+import com.example.dindon.ui.vibration.VibrationPatterns
 import kotlin.math.max
 import kotlin.math.min
 
@@ -52,10 +53,17 @@ fun AlarmEditScreen(
     var soundId by rememberSaveable { mutableStateOf(initial.sound) }
     var snoozeMinutes by rememberSaveable { mutableStateOf(initial.snoozeMinutes) }
     var vibrate by rememberSaveable { mutableStateOf(initial.vibrate) }
+    var vibrationPattern by rememberSaveable {
+        mutableStateOf(initial.vibrationPattern ?: "pulse")
+    }
+    var showVibrationPicker by remember { mutableStateOf(false) }
 
     val selectedSound = remember(soundId) {
-        AlarmSounds.all.find { it.id == soundId }
-            ?: AlarmSounds.Sound(soundId, "Пользовательский файл", -1)
+        when (soundId) {
+            AlarmSounds.NONE_ID -> AlarmSounds.Sound(AlarmSounds.NONE_ID, "Без звука", null)
+            else -> AlarmSounds.all.find { it.id == soundId }
+                ?: AlarmSounds.Sound(soundId, "Пользовательский файл", null)
+        }
     }
 
 
@@ -77,6 +85,13 @@ fun AlarmEditScreen(
             AlarmSounds.registerCustomSound(soundId, name) // см. ниже
             wasEdited = true
         }
+    }
+
+    val isSoundOff = soundId == AlarmSounds.NONE_ID
+    val mode = when {
+        isSoundOff && vibrate -> "vibrate_only"
+        !isSoundOff && vibrate -> "sound_and_vibrate"
+        else -> "sound_only"
     }
 
     if (showUnsavedDialog) {
@@ -130,7 +145,8 @@ fun AlarmEditScreen(
                             days = days,
                             sound = soundId,
                             snoozeMinutes = snoozeMinutes,
-                            vibrate = vibrate
+                            vibrate = vibrate,
+                            vibrationPattern = vibrationPattern
                         )
                     )
                     Toast.makeText(context, "Изменения сохранены", Toast.LENGTH_SHORT).show()
@@ -255,6 +271,16 @@ fun AlarmEditScreen(
                 }
             }
 
+            if (vibrate) {
+                NeuCard(modifier = Modifier.fillMaxWidth()) {
+                    SettingRowClickable(
+                        title = "Vibration type",
+                        value = VibrationPatterns.titleFor(vibrationPattern),
+                        onClick = { showVibrationPicker = true }
+                    )
+                }
+            }
+
             if (showSoundPicker) {
                 AlertDialog(
                     onDismissRequest = { showSoundPicker = false },
@@ -262,6 +288,25 @@ fun AlarmEditScreen(
                     text = {
                         Column {
                             LazyColumn {
+                                item {
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                soundId = AlarmSounds.NONE_ID
+                                                showSoundPicker = false
+                                                wasEdited = true
+                                            }
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Без звука", Modifier.weight(1f))
+                                        if (soundId == AlarmSounds.NONE_ID) {
+                                            Icon(Icons.Default.Check, contentDescription = null)
+                                        }
+                                    }
+                                }
+
                                 items(AlarmSounds.all) { sound ->
                                     Row(
                                         Modifier
@@ -282,7 +327,7 @@ fun AlarmEditScreen(
                                 }
 
                                 item {
-                                    if (AlarmSounds.all.none { it.id == soundId }) {
+                                    if (soundId != AlarmSounds.NONE_ID && AlarmSounds.all.none { it.id == soundId }) {
                                         Row(
                                             Modifier
                                                 .fillMaxWidth()
@@ -314,6 +359,35 @@ fun AlarmEditScreen(
                 )
             }
 
+            if (showVibrationPicker) {
+                AlertDialog(
+                    onDismissRequest = { showVibrationPicker = false },
+                    title = { Text("Vibration type") },
+                    text = {
+                        Column {
+                            VibrationPatterns.all.forEach { pattern ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            vibrationPattern = pattern.id
+                                            showVibrationPicker = false
+                                            wasEdited = true
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(pattern.title, Modifier.weight(1f))
+                                    if (pattern.id == vibrationPattern) {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {},
+                )
+            }
 
             Spacer(Modifier.height(80.dp))
         }
@@ -356,10 +430,18 @@ private fun SettingRowClickable(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(value)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.widthIn(max = 180.dp) // можно подправить
+        ) {
+            Text(
+                text = value,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
             Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
         }
+
     }
 }
 
