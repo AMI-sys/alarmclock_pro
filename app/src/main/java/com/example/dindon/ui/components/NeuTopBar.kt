@@ -7,6 +7,7 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,8 +17,10 @@ import com.example.dindon.ui.theme.Neu
 @Composable
 fun NeuTopBar(
     title: String,
-    onSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    onNavigation: () -> Unit,
+    showSettings: Boolean,
+    modifier: Modifier = Modifier,
+    trailingIcon: @Composable (() -> Unit)? = null
 ) {
     NeuCard(
         modifier = modifier
@@ -31,27 +34,37 @@ fun NeuTopBar(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clickable(onClick = onNavigation),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (showSettings) Icons.Default.Settings else Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (showSettings) "Settings" else "Back",
+                    tint = Neu.onBg.copy(alpha = 0.80f)
+                )
+            }
+
             Text(
                 text = title,
                 style = MaterialTheme.typography.h6,
                 color = Neu.onBg.copy(alpha = 0.92f),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 8.dp)
             )
 
-            // не Material IconButton (он слишком “материалит”),
-            // делаем простую кликабельную иконку
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clickable(onClick = onSettings),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = Neu.onBg.copy(alpha = 0.80f)
-                )
+            if (trailingIcon != null) {
+                Box(
+                    modifier = Modifier.wrapContentSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    trailingIcon()
+                }
             }
         }
     }
 }
+

@@ -1,17 +1,29 @@
 package com.example.dindon.ui.screens
 
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.NumberPicker
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.*
+import androidx.compose.material.AlertDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.dindon.model.Alarm
 import com.example.dindon.model.WeekDay
+import com.example.dindon.ui.components.*
 import com.example.dindon.ui.sound.AlarmSounds
 import kotlin.math.max
 import kotlin.math.min
@@ -28,220 +41,281 @@ fun AlarmEditScreen(
     initial: Alarm,
     groupSuggestions: List<String>,
     onCancel: () -> Unit,
-    onSave: (Alarm) -> Unit
+    onSave: (Alarm) -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
-    var hour by remember { mutableStateOf(initial.hour) }
-    var minute by remember { mutableStateOf(initial.minute) }
-    var label by remember { mutableStateOf(initial.label) }
-    var group by remember { mutableStateOf(initial.groupName) }
-    var days by remember { mutableStateOf(initial.days) }
-
-    var soundId by remember { mutableStateOf(initial.sound) }
-    var snoozeMinutes by remember { mutableStateOf(initial.snoozeMinutes) }
-    var vibrate by remember { mutableStateOf(initial.vibrate) }
-
-    var groupMenuExpanded by remember { mutableStateOf(false) }
-    var soundMenuExpanded by remember { mutableStateOf(false) }
-
-    val vScroll = rememberScrollState()
-    val hScroll = rememberScrollState()
+    var hour by rememberSaveable { mutableStateOf(initial.hour) }
+    var minute by rememberSaveable { mutableStateOf(initial.minute) }
+    var label by rememberSaveable { mutableStateOf(initial.label) }
+    var group by rememberSaveable { mutableStateOf(initial.groupName) }
+    var days by rememberSaveable { mutableStateOf(initial.days.toSet()) }
+    var soundId by rememberSaveable { mutableStateOf(initial.sound) }
+    var snoozeMinutes by rememberSaveable { mutableStateOf(initial.snoozeMinutes) }
+    var vibrate by rememberSaveable { mutableStateOf(initial.vibrate) }
 
     val selectedSound = remember(soundId) {
-        AlarmSounds.byId(soundId)
+        AlarmSounds.all.find { it.id == soundId }
+            ?: AlarmSounds.Sound(soundId, "Пользовательский файл", -1)
+    }
+
+
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+    var wasEdited by remember { mutableStateOf(false) }
+
+    var showSoundPicker by remember { mutableStateOf(false) }
+    val customSoundLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            val name = context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst()) cursor.getString(nameIndex) else "Пользовательский файл"
+            } ?: "Пользовательский файл"
+
+            soundId = it.toString()
+            AlarmSounds.registerCustomSound(soundId, name) // см. ниже
+            wasEdited = true
+        }
+    }
+
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            title = { Text("Несохраненные изменения") },
+            text = { Text("У вас есть несохраненные изменения. Выйти без сохранения?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUnsavedDialog = false
+                    onCancel()
+                }) {
+                    Text("Да")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnsavedDialog = false }) {
+                    Text("Нет")
+                }
+            }
+        )
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Set alarm") },
-                navigationIcon = {
-                    IconButton(onClick = onCancel) {
-                        Icon(Icons.Default.Close, contentDescription = "Cancel")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        onSave(
-                            initial.copy(
-                                hour = hour,
-                                minute = minute,
-                                label = label.ifBlank { "Alarm" },
-                                groupName = group.ifBlank { "Default" },
-                                days = days,
-                                sound = soundId,
-                                snoozeMinutes = snoozeMinutes,
-                                vibrate = vibrate
-                            )
-                        )
-                    }) {
-                        Icon(Icons.Default.Check, contentDescription = "Save")
-                    }
+            NeuTopBar(
+                title = "Будильник",
+                showSettings = false,
+                onNavigation = {
+                    if (wasEdited) showUnsavedDialog = true else onCancel()
                 }
             )
+        },
+        bottomBar = {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                onDelete?.let {
+                    NewButton(onClick = onDelete) { Text("Удалить") }
+                }
+                NewButton(onClick = {
+                    onSave(
+                        initial.copy(
+                            hour = hour,
+                            minute = minute,
+                            label = label.ifBlank { "Alarm" },
+                            groupName = group.ifBlank { "Default" },
+                            days = days,
+                            sound = soundId,
+                            snoozeMinutes = snoozeMinutes,
+                            vibrate = vibrate
+                        )
+                    )
+                    Toast.makeText(context, "Изменения сохранены", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("Сохранить")
+                }
+            }
         }
     ) { padding ->
         Column(
             Modifier
                 .padding(padding)
-                .verticalScroll(vScroll)
+                .verticalScroll(scrollState)
                 .padding(16.dp)
         ) {
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                NumberPickerField(hour, 0..23) { hour = it }
-                NumberPickerField(minute, 0..59) { minute = it }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Card {
-                Column(Modifier.padding(16.dp)) {
-
-                    Text("Repeat")
-                    Spacer(Modifier.height(8.dp))
-
-                    Row(
-                        Modifier.horizontalScroll(hScroll),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        WeekDay.values().forEach { day ->
-                            DayChip(
-                                text = day.short,
-                                selected = days.contains(day)
-                            ) {
-                                days =
-                                    if (days.contains(day)) days - day
-                                    else days + day
-                            }
-                        }
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    NumberPickerField(hour, 0..23) {
+                        hour = it
+                        wasEdited = true
                     }
-
-                    Divider(Modifier.padding(vertical = 12.dp))
-
-                    SettingRowClickable("Group", group) {
-                        groupMenuExpanded = true
-                    }
-
-                    DropdownMenu(
-                        expanded = groupMenuExpanded,
-                        onDismissRequest = { groupMenuExpanded = false }
-                    ) {
-                        groupSuggestions.distinct().forEach { g ->
-                            DropdownMenuItem(onClick = {
-                                group = g
-                                groupMenuExpanded = false
-                            }) {
-                                Text(g)
-                            }
-                        }
-                    }
-
-                    Divider(Modifier.padding(vertical = 12.dp))
-
-                    OutlinedTextField(
-                        value = label,
-                        onValueChange = { label = it },
-                        label = { Text("Label") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Divider(Modifier.padding(vertical = 12.dp))
-
-                    SettingRowClickable("Alarm sound", selectedSound.title) {
-                        soundMenuExpanded = true
-                    }
-
-                    DropdownMenu(
-                        expanded = soundMenuExpanded,
-                        onDismissRequest = { soundMenuExpanded = false }
-                    ) {
-                        AlarmSounds.all.forEach { s ->
-                            DropdownMenuItem(onClick = {
-                                soundId = s.id
-                                soundMenuExpanded = false
-                            }) {
-                                Text(s.title)
-                            }
-                        }
-                    }
-
-                    Divider(Modifier.padding(vertical = 12.dp))
-
-                    Text("Snooze: $snoozeMinutes min")
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        OutlinedButton(onClick = {
-                            snoozeMinutes = max(1, snoozeMinutes - 1)
-                        }) { Text("−") }
-
-                        OutlinedButton(onClick = {
-                            snoozeMinutes = min(60, snoozeMinutes + 1)
-                        }) { Text("+") }
-                    }
-
-                    Divider(Modifier.padding(vertical = 12.dp))
-
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Vibration")
-                        Switch(
-                            checked = vibrate,
-                            onCheckedChange = { vibrate = it }
-                        )
+                    NumberPickerField(minute, 0..59) {
+                        minute = it
+                        wasEdited = true
                     }
                 }
             }
 
+            Spacer(Modifier.height(16.dp))
+
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Повтор", style = MaterialTheme.typography.subtitle1)
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        WeekDay.values().forEach { day ->
+                            NeuChip(
+                                text = day.short,
+                                selected = days.contains(day),
+                                onClick = {
+                                    days = if (days.contains(day)) days - day else days + day
+                                    wasEdited = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                SettingRowInput("Метка", label) {
+                    label = it
+                    wasEdited = true
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                SettingRowInput("Группа", group) {
+                    group = it
+                    wasEdited = true
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                SettingRowClickable("Мелодия", selectedSound.title) {
+                    showSoundPicker = true
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Повтор сигнала: $snoozeMinutes мин", style = MaterialTheme.typography.body1)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NewButton(onClick = {
+                            snoozeMinutes = max(1, snoozeMinutes - 1)
+                            wasEdited = true
+                        }) { Text("−") }
+
+                        NewButton(onClick = {
+                            snoozeMinutes = min(60, snoozeMinutes + 1)
+                            wasEdited = true
+                        }) { Text("+") }
+                    }
+                }
+            }
+
+
+            Spacer(Modifier.height(16.dp))
+
+            NeuCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Вибрация", style = MaterialTheme.typography.body1)
+                    NewToggle(checked = vibrate, onCheckedChange = {
+                        vibrate = it
+                        wasEdited = true
+                    })
+                }
+            }
+
+            if (showSoundPicker) {
+                AlertDialog(
+                    onDismissRequest = { showSoundPicker = false },
+                    title = { Text("Выберите мелодию") },
+                    text = {
+                        Column {
+                            LazyColumn {
+                                items(AlarmSounds.all) { sound ->
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                soundId = sound.id
+                                                showSoundPicker = false
+                                                wasEdited = true
+                                            }
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(sound.title, Modifier.weight(1f))
+                                        if (sound.id == soundId) {
+                                            Icon(Icons.Default.Check, contentDescription = null)
+                                        }
+                                    }
+                                }
+
+                                item {
+                                    if (AlarmSounds.all.none { it.id == soundId }) {
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    showSoundPicker = false
+                                                }
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Пользовательский файл", Modifier.weight(1f))
+                                            Icon(Icons.Default.Check, contentDescription = null)
+                                        }
+                                    }
+                                }
+
+
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            NewButton(onClick = {
+                                showSoundPicker = false
+                                customSoundLauncher.launch(arrayOf("audio/*"))
+                            }) {
+                                Text("Выбрать свой файл")
+                            }
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {}
+                )
+            }
+
+
             Spacer(Modifier.height(80.dp))
-        }
-    }
-}
-
-/* ---------- helpers ---------- */
-
-@Composable
-private fun SettingRowClickable(
-    title: String,
-    value: String,
-    onClick: () -> Unit
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(title)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(value)
-            Icon(Icons.Default.KeyboardArrowDown, null)
-        }
-    }
-}
-
-@Composable
-private fun DayChip(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Card(
-        backgroundColor =
-            if (selected) MaterialTheme.colors.primary.copy(alpha = 0.25f)
-            else MaterialTheme.colors.onSurface.copy(alpha = 0.08f),
-        elevation = 0.dp
-    ) {
-        TextButton(onClick = onClick) {
-            Text(text)
         }
     }
 }
@@ -259,14 +333,48 @@ private fun NumberPickerField(
                 minValue = range.first
                 maxValue = range.last
                 setFormatter { it.toString().padStart(2, '0') }
-                setOnValueChangedListener { _, _, new ->
-                    onValueChange(new)
-                }
+                setOnValueChangedListener { _, _, new -> onValueChange(new) }
                 this.value = value
             }
         },
-        update = {
-            if (it.value != value) it.value = value
+        update = { if (it.value != value) it.value = value }
+    )
+}
+
+@Composable
+private fun SettingRowClickable(
+    title: String,
+    value: String,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(value)
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
         }
+    }
+}
+
+@Composable
+private fun SettingRowInput(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp)
     )
 }

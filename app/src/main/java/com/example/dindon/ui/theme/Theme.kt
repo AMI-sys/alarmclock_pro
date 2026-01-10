@@ -7,10 +7,6 @@ import androidx.compose.material.lightColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// Если у тебя Neu лежит в другом package — замени импорт на свой.
-// Рекомендация: положи Neumorphism.kt в этот же package и тогда импорт не нужен.
-import com.example.dindon.ui.theme.Neu
-
 private val DarkColorPalette = darkColors(
     primary = Purple80,
     secondary = PurpleGrey80,

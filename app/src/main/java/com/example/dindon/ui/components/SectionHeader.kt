@@ -13,7 +13,7 @@ import com.example.dindon.ui.theme.Neu
 @Composable
 fun SectionHeader(
     title: String,
-    count: Int,
+    count: Int? = null,
     modifier: Modifier = Modifier
 ) {
     NeuCard(
@@ -31,11 +31,13 @@ fun SectionHeader(
                 color = Neu.onBg.copy(alpha = 0.88f),
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                text = count.toString(),
-                style = MaterialTheme.typography.caption,
-                color = Neu.onBg.copy(alpha = 0.55f)
-            )
+            if (count != null) {
+                Text(
+                    text = count.toString(),
+                    style = MaterialTheme.typography.caption,
+                    color = Neu.onBg.copy(alpha = 0.55f)
+                )
+            }
         }
     }
 }

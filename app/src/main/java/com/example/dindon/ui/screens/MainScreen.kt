@@ -24,11 +24,10 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
 
     var editingId by remember { mutableStateOf<Int?>(null) }
     var showSettings by remember { mutableStateOf(false) }
-    var defaultVibrate by remember { mutableStateOf(true) } // пока заглушка
+    var defaultVibrate by remember { mutableStateOf(true) }
 
     val groupNames = vm.groups.map { it.name }
 
-    // ===== SETTINGS SCREEN =====
     if (showSettings) {
         SettingsScreen(
             onBack = { showSettings = false },
@@ -38,7 +37,6 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
         return
     }
 
-    // ===== FULL SCREEN EDITOR =====
     if (editingId != null) {
         val initial = if (editingId == NEW_ALARM_ID) {
             defaultNewAlarm(groupNames, defaultVibrate)
@@ -61,7 +59,6 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
         return
     }
 
-    // ===== LIST SCREEN =====
     Scaffold(
         floatingActionButtonPosition = FabPosition.End,
         floatingActionButton = {
@@ -76,19 +73,17 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
             }
         }
     ) { padding ->
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // ✅ Неоморфный заголовок вместо TopAppBar
             NeuTopBar(
                 title = "Dindon Alarm",
-                onSettings = { showSettings = true }
+                onNavigation = { showSettings = true },
+                showSettings = true
             )
 
-            // ✅ Segmented Control вместо ModeSwitcher
             NeuSegmentedControl(
                 leftText = "Alarms",
                 rightText = "Groups",
@@ -124,11 +119,9 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                         else (everyday.isEmpty() && dayList.isEmpty())
 
                     if (nothingToShow) {
-                        // ✅ Компонент из ui/components/EmptyState.kt
                         EmptyState(onClear = vm::resetFilters)
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-
                             if (everyday.isNotEmpty()) {
                                 item { SectionHeader(title = "Everyday", count = everyday.size) }
                                 items(everyday, key = { "every_${it.id}" }) { alarm ->
@@ -170,7 +163,7 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                                 }
                             }
 
-                            item { Spacer(Modifier.height(96.dp)) } // место под FAB
+                            item { Spacer(Modifier.height(96.dp)) }
                         }
                     }
                 }

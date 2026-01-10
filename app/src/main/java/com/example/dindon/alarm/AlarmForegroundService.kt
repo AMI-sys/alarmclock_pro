@@ -15,6 +15,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.example.dindon.R
 import com.example.dindon.ui.sound.AlarmSounds
+import android.net.Uri
 
 class AlarmForegroundService : Service() {
 
@@ -144,10 +145,7 @@ class AlarmForegroundService : Service() {
         stopRing()
         reachedFullVolume = false
 
-        val sound = AlarmSounds.byId(soundId)
-        val resId = sound.resId
-
-        val afd = resources.openRawResourceFd(resId) ?: return
+        val sound = AlarmSounds.byId(soundId) ?: return
 
         val mp = MediaPlayer().apply {
             setAudioAttributes(
@@ -157,22 +155,28 @@ class AlarmForegroundService : Service() {
                     .build()
             )
 
-            setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-            afd.close()
-
             isLooping = true
+            setVolume(0f, 0f) // Начнем с 0 — потом fade-in
 
-            // стартуем с нуля, дальше поднимем
-            setVolume(0f, 0f)
-
-            prepare()
-            start()
+            if (sound.resId != null) {
+                // системный звук из raw ресурсов
+                val afd = resources.openRawResourceFd(sound.resId) ?: return
+                setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+            } else {
+                val uri = Uri.parse(sound.id)
+                setDataSource(applicationContext, uri)
+                setOnPreparedListener {
+                    start()
+                    startFadeIn()
+                }
+                prepareAsync()
+            }
         }
 
         player = mp
 
         mp.setOnErrorListener { _, _, _ ->
-            // пересоздаём плеер и продолжаем играть, сервис не падает
             val lastSoundId = soundId
             handler.post {
                 startRing(lastSoundId)
@@ -185,6 +189,7 @@ class AlarmForegroundService : Service() {
 
         startFadeIn()
     }
+
 
 
     private fun stopRing() {

@@ -57,6 +57,9 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation("androidx.compose.material:material")
 
+    // Neomorph
+    implementation("com.github.fornewid:neumorphism:0.3.2")// последняя версия библиотеки
+
     // Тесты (оставим как было)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
