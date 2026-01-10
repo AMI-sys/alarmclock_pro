@@ -9,6 +9,9 @@
     <!-- Wake / foreground -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+	
+	<!-- Vibration -->
+	<uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Android 14+: mediaPlayback foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />

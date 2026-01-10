@@ -148,13 +148,9 @@ class AlarmViewModel(app: Application) : AndroidViewModel(app) {
             return stored
         }
 
-        // если первый запуск — создадим пару примеров, но уже в Store
-        val demo = sampleAlarms()
-        store.setAlarms(demo)
-
-        // и сразу запланируем включенные
-        demo.filter { it.enabled }.forEach { AlarmScheduler.schedule(getApplication(), it) }
-        return demo
+        // Первый запуск: НЕ создаём никаких заглушек
+        store.setAlarms(emptyList())
+        return emptyList()
     }
 
     private fun recalcGroupsAndFixFilters() {
@@ -172,31 +168,6 @@ class AlarmViewModel(app: Application) : AndroidViewModel(app) {
         return if (cleaned.isEmpty()) "Default" else cleaned
     }
 }
-
-// ===== Sample data =====
-
-private fun sampleAlarms(): List<Alarm> = listOf(
-    Alarm(
-        id = 1, hour = 7, minute = 30,
-        label = "Подъём",
-        groupName = "Work",
-        enabled = true,
-        days = setOf(WeekDay.Mon, WeekDay.Tue, WeekDay.Wed, WeekDay.Thu, WeekDay.Fri),
-        sound = "default",
-        snoozeMinutes = 10,
-        vibrate = true
-    ),
-    Alarm(
-        id = 2, hour = 9, minute = 0,
-        label = "Каждый день",
-        groupName = "Any",
-        enabled = true,
-        days = emptySet(), // пусто = каждый день
-        sound = "default",
-        snoozeMinutes = 10,
-        vibrate = true
-    )
-)
 
 private fun buildGroups(alarms: List<Alarm>): List<AlarmGroup> {
     val grouped = alarms.groupBy { it.groupName }

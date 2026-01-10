@@ -70,6 +70,7 @@ class AlarmForegroundService : Service() {
         val action = intent?.action ?: return START_NOT_STICKY
 
         when (action) {
+
             AlarmActions.ACTION_TRIGGER -> {
                 val alarmId = intent.getIntExtra(AlarmActions.EXTRA_ALARM_ID, -1)
                 val label = intent.getStringExtra(AlarmActions.EXTRA_LABEL) ?: "Alarm"
@@ -77,14 +78,53 @@ class AlarmForegroundService : Service() {
                 val vibrate = intent.getBooleanExtra(AlarmActions.EXTRA_VIBRATE, true)
                 val snoozeMin = intent.getIntExtra(AlarmActions.EXTRA_SNOOZE_MIN, 5)
 
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+                val wasInteractive = pm.isInteractive
+                val useFullScreen = !wasInteractive || km.isKeyguardLocked
+
+                val uiIntent = Intent(this, AlarmRingActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    )
+                    putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
+                    putExtra(AlarmActions.EXTRA_LABEL, label)
+                    putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
+                    putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                    putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
+                }
+
+                val fullScreenPi = PendingIntent.getActivity(
+                    this,
+                    alarmId, // вместо 0
+                    uiIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+
                 acquireWakeLock()
+
                 startForeground(
                     NOTIF_ID,
-                    buildNotification(alarmId, label, soundId, vibrate, snoozeMin)
+                    buildNotification(
+                        alarmId = alarmId,
+                        label = label,
+                        soundId = soundId,
+                        vibrate = vibrate,
+                        snoozeMin = snoozeMin,
+                        useFullScreen = useFullScreen,
+                        fullScreenIntent = fullScreenPi
+                    )
                 )
+
+                if (useFullScreen) {
+                    runCatching { fullScreenPi.send() }
+                }
+
                 startRing(soundId)
                 if (vibrate) startVibration()
-
             }
 
             AlarmActions.ACTION_DISMISS -> {
@@ -103,10 +143,15 @@ class AlarmForegroundService : Service() {
                 AlarmScheduler.snooze(this, alarmId, label, soundId, vibrate, snoozeMin)
                 stopSelf()
             }
+
+            else -> {
+                // неизвестное действие — игнорируем
+            }
         }
 
         return START_NOT_STICKY
     }
+
 
     override fun onDestroy() {
         stopEverything()
@@ -118,42 +163,26 @@ class AlarmForegroundService : Service() {
         label: String,
         soundId: String,
         vibrate: Boolean,
-        snoozeMin: Int
+        snoozeMin: Int,
+        useFullScreen: Boolean,
+        fullScreenIntent: PendingIntent
     ): Notification {
         createChannel()
 
-        val fullScreenIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, AlarmRingActivity::class.java).apply {
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP
-                )
-                putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
-                putExtra(AlarmActions.EXTRA_LABEL, label)
-                putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
-                putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
-                putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val dismissPi = PendingIntent.getBroadcast(
+        val dismissPi = PendingIntent.getService(
             this,
             1,
-            Intent(this, AlarmReceiver::class.java).apply {
+            Intent(this, AlarmForegroundService::class.java).apply {
                 action = AlarmActions.ACTION_DISMISS
                 putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val snoozePi = PendingIntent.getBroadcast(
+        val snoozePi = PendingIntent.getService(
             this,
             2,
-            Intent(this, AlarmReceiver::class.java).apply {
+            Intent(this, AlarmForegroundService::class.java).apply {
                 action = AlarmActions.ACTION_SNOOZE
                 putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
                 putExtra(AlarmActions.EXTRA_LABEL, label)
@@ -164,6 +193,7 @@ class AlarmForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("Будильник")
@@ -172,7 +202,8 @@ class AlarmForegroundService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setFullScreenIntent(fullScreenIntent, shouldUseFullScreen())
+            .setFullScreenIntent(fullScreenIntent, useFullScreen)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(0, "Snooze", snoozePi)
             .addAction(0, "Dismiss", dismissPi)
             .build()
@@ -181,27 +212,29 @@ class AlarmForegroundService : Service() {
     private fun startRing(soundId: String) {
         stopRing()
         reachedFullVolume = false
-        requestAlarmAudioFocus()
+
+        val focusGranted = requestAlarmAudioFocus()
+        android.util.Log.d("AlarmFG", "Audio focus granted=$focusGranted")
 
         val sound = AlarmSounds.byId(soundId) ?: return
 
-        val mp = MediaPlayer().apply {
-            setAudioAttributes(alarmAudioAttributes())
+        val mp = MediaPlayer()
+        player = mp // <-- ВАЖНО: до startFadeIn()
 
+        mp.apply {
+            setAudioAttributes(alarmAudioAttributes())
             isLooping = true
-            setVolume(0f, 0f) // start silent, fade-in after playback starts
+            setVolume(0f, 0f)
 
             if (sound.resId != null) {
-                // Built-in sound from raw resources
                 val afd = resources.openRawResourceFd(sound.resId) ?: return
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
 
                 prepare()
                 start()
-                startFadeIn()
+                startFadeIn()     // теперь player уже не null
             } else {
-                // Custom sound (uri)
                 val uri = Uri.parse(sound.id)
                 setDataSource(applicationContext, uri)
                 setOnPreparedListener {
@@ -210,24 +243,16 @@ class AlarmForegroundService : Service() {
                 }
                 prepareAsync()
             }
-        }
 
-        player = mp
-
-        mp.setOnErrorListener { _, _, _ ->
-            val lastSoundId = soundId
-            handler.post {
-                stopRing()
-                startRing(lastSoundId)
-                if (reachedFullVolume) {
-                    player?.setVolume(1f, 1f)
+            setOnErrorListener { _, _, _ ->
+                handler.post {
+                    stopRing()
+                    startRing(soundId)
                 }
+                true
             }
-            true
         }
     }
-
-
 
 
     private fun stopRing() {
@@ -246,10 +271,12 @@ class AlarmForegroundService : Service() {
     }
 
 
-    private fun shouldUseFullScreen(): Boolean {
-        val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
-        return km.isKeyguardLocked
-    }
+    //private fun shouldUseFullScreen(): Boolean {
+    //    val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+    //    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+    //    val screenOff = !pm.isInteractive
+    //    return screenOff || km.isKeyguardLocked
+    //}
 
 
     private fun stopEverything() {
@@ -310,15 +337,28 @@ class AlarmForegroundService : Service() {
 
 
     private fun acquireWakeLock() {
-        if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        // 1) кратко будим экран (deprecated, но это стандартный практический путь для будильников)
+        @Suppress("DEPRECATION")
+        val screenLock = pm.newWakeLock(
+            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+            "dindon:alarm_screen_wakelock"
+        )
+        screenLock.acquire(30_000L) // 30 сек достаточно, чтобы Activity поднялась
+
+        // 2) и отдельно держим PARTIAL, чтобы CPU не уснул
+        if (wakeLock?.isHeld == true) return
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "dindon:alarm_wakelock"
         ).apply {
-            acquire(10 * 60 * 1000L) // максимум 10 минут
+            acquire(10 * 60 * 1000L)
         }
     }
+
 
     private fun releaseWakeLock() {
         wakeLock?.runCatching { if (isHeld) release() }
@@ -393,17 +433,19 @@ class AlarmForegroundService : Service() {
         val v = getVibrator()
         if (!v.hasVibrator()) return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Pattern: vibrate / pause / vibrate...
-            val timings = longArrayOf(0, 800, 400, 800)
-            val amplitudes = intArrayOf(0, 255, 0, 255)
-            val effect = VibrationEffect.createWaveform(timings, amplitudes, 0)
-            v.vibrate(effect)
-        } else {
-            @Suppress("DEPRECATION")
-            v.vibrate(longArrayOf(0, 800, 400, 800), 0)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val timings = longArrayOf(0, 800, 400, 800)
+                val amplitudes = intArrayOf(0, 255, 0, 255)
+                val effect = VibrationEffect.createWaveform(timings, amplitudes, 0)
+                v.vibrate(effect)
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(longArrayOf(0, 800, 400, 800), 0)
+            }
         }
     }
+
 
     private fun stopVibration() {
         vibrator?.runCatching { cancel() }
