@@ -29,13 +29,16 @@ class MainActivity : ComponentActivity() {
         // Android 12+: если exact alarms запрещены — ведём в системный экран включения
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            if (!am.canScheduleExactAlarms()) {
-                // Это системный экран, где пользователь включает "Разрешить точные будильники"
-                val i = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                if (!am.canScheduleExactAlarms()) {
+                    val i = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                    if (i.resolveActivity(packageManager) != null) {
+                        runCatching { startActivity(i) }
+                    }
                 }
-                startActivity(i)
             }
+
         }
 
         setContent {

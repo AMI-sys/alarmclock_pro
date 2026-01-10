@@ -79,7 +79,7 @@ fun MainScreen(vm: AlarmViewModel = viewModel()) {
                 .padding(padding)
         ) {
             NeuTopBar(
-                title = "Dindon Alarm",
+                title = "Alarm Clock Pro v1",
                 onNavigation = { showSettings = true },
                 showSettings = true
             )
@@ -191,7 +191,7 @@ private fun defaultNewAlarm(groupSuggestions: List<String>, defaultVibrate: Bool
         groupName = group,
         enabled = true,
         days = emptySet(),
-        sound = "Default",
+        sound = "american",
         snoozeMinutes = 10,
         vibrate = defaultVibrate
     )

@@ -9,18 +9,54 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import com.example.dindon.R
 import com.example.dindon.ui.sound.AlarmSounds
 import android.net.Uri
 
+
 class AlarmForegroundService : Service() {
 
     private var player: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var vibrator: Vibrator? = null
+
+    private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    private var audioFocusRequest: AudioFocusRequest? = null
+
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        handler.post {
+            when (change) {
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    // вернули фокус — продолжаем
+                    player?.let { mp ->
+                        if (!mp.isPlaying) {
+                            runCatching { mp.start() }
+                            // если мы уже дошли до полной громкости — не делаем fade заново
+                            if (!reachedFullVolume) startFadeIn() else mp.setVolume(1f, 1f)
+                        }
+                    }
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    // кратковременная потеря (звонок/ассистент) — пауза
+                    player?.runCatching { if (isPlaying) pause() }
+                }
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    // потеря фокуса — останавливаем звук
+                    stopRing()
+                }
+            }
+        }
+    }
+
     private val fadeDurationMs = 10_000L
     private val fadeStepMs = 100L
     private var fadeRunnable: Runnable? = null
@@ -47,6 +83,7 @@ class AlarmForegroundService : Service() {
                     buildNotification(alarmId, label, soundId, vibrate, snoozeMin)
                 )
                 startRing(soundId)
+                if (vibrate) startVibration()
 
             }
 
@@ -144,30 +181,31 @@ class AlarmForegroundService : Service() {
     private fun startRing(soundId: String) {
         stopRing()
         reachedFullVolume = false
+        requestAlarmAudioFocus()
 
         val sound = AlarmSounds.byId(soundId) ?: return
 
         val mp = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
+            setAudioAttributes(alarmAudioAttributes())
 
             isLooping = true
-            setVolume(0f, 0f) // Начнем с 0 — потом fade-in
+            setVolume(0f, 0f) // start silent, fade-in after playback starts
 
             if (sound.resId != null) {
-                // системный звук из raw ресурсов
+                // Built-in sound from raw resources
                 val afd = resources.openRawResourceFd(sound.resId) ?: return
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
+
+                prepare()
+                start()
+                startFadeIn()
             } else {
+                // Custom sound (uri)
                 val uri = Uri.parse(sound.id)
                 setDataSource(applicationContext, uri)
                 setOnPreparedListener {
-                    start()
+                    it.start()
                     startFadeIn()
                 }
                 prepareAsync()
@@ -179,6 +217,7 @@ class AlarmForegroundService : Service() {
         mp.setOnErrorListener { _, _, _ ->
             val lastSoundId = soundId
             handler.post {
+                stopRing()
                 startRing(lastSoundId)
                 if (reachedFullVolume) {
                     player?.setVolume(1f, 1f)
@@ -186,9 +225,8 @@ class AlarmForegroundService : Service() {
             }
             true
         }
-
-        startFadeIn()
     }
+
 
 
 
@@ -203,7 +241,10 @@ class AlarmForegroundService : Service() {
             release()
         }
         player = null
+
+        abandonAlarmAudioFocus()
     }
+
 
     private fun shouldUseFullScreen(): Boolean {
         val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
@@ -213,6 +254,7 @@ class AlarmForegroundService : Service() {
 
     private fun stopEverything() {
         stopRing()
+        stopVibration()
         releaseWakeLock()
         stopForegroundCompat()
     }
@@ -223,6 +265,46 @@ class AlarmForegroundService : Service() {
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
+        }
+    }
+
+    private fun alarmAudioAttributes(): AudioAttributes =
+        AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+
+    private fun requestAlarmAudioFocus(): Boolean {
+        val attrs = alarmAudioAttributes()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                .setAudioAttributes(attrs)
+                .setOnAudioFocusChangeListener(focusListener)
+                .setAcceptsDelayedFocusGain(false)
+                .build()
+
+            audioFocusRequest = req
+            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                focusListener,
+                AudioManager.STREAM_ALARM,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonAlarmAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { req ->
+                audioManager.abandonAudioFocusRequest(req)
+            }
+            audioFocusRequest = null
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(focusListener)
         }
     }
 
@@ -293,6 +375,40 @@ class AlarmForegroundService : Service() {
         fadeRunnable?.let { handler.removeCallbacks(it) }
         fadeRunnable = null
     }
+
+    private fun getVibrator(): Vibrator {
+        vibrator?.let { return it }
+        val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vm.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        vibrator = v
+        return v
+    }
+
+    private fun startVibration() {
+        val v = getVibrator()
+        if (!v.hasVibrator()) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Pattern: vibrate / pause / vibrate...
+            val timings = longArrayOf(0, 800, 400, 800)
+            val amplitudes = intArrayOf(0, 255, 0, 255)
+            val effect = VibrationEffect.createWaveform(timings, amplitudes, 0)
+            v.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            v.vibrate(longArrayOf(0, 800, 400, 800), 0)
+        }
+    }
+
+    private fun stopVibration() {
+        vibrator?.runCatching { cancel() }
+    }
+
 
     companion object {
         private const val CHANNEL_ID = "alarm_channel"

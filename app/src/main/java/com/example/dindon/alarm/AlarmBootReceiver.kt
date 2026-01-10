@@ -13,7 +13,7 @@ class AlarmBootReceiver : BroadcastReceiver() {
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
                 val alarms = AlarmStore(context).getAlarms()
-                AlarmScheduler.rescheduleAll(context, alarms)
+                AlarmScheduler.rescheduleAll(context, alarms.filter { it.enabled })
             }
         }
     }

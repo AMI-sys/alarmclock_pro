@@ -10,7 +10,7 @@ data class Alarm(
     val days: Set<WeekDay> = emptySet(),
 
     // NEW
-    val sound: String = "Default",
+    val sound: String = "american",
     val snoozeMinutes: Int = 10,
     val vibrate: Boolean = true
 )

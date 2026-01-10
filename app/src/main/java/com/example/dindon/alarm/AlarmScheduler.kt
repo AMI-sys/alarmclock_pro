@@ -96,16 +96,14 @@ object AlarmScheduler {
     }
 
     private fun setExactFallback(am: AlarmManager, triggerAt: Long, pi: PendingIntent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (am.canScheduleExactAlarms()) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-            } else {
-                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-            }
-        } else {
+        try {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+        } catch (_: SecurityException) {
+            // если у приложения нет права на exact alarms — хотя бы приблизительно
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
         }
     }
+
 
     private fun buildTriggerPendingIntent(
         context: Context,

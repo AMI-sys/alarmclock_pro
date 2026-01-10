@@ -16,9 +16,20 @@ object AlarmSounds {
     val all: List<Sound>
         get() = builtIn + customSounds.map { Sound(it.key, it.value, null) }
 
-    fun byId(id: String): Sound? {
-        return builtIn.find { it.id == id } ?: customSounds[id]?.let { Sound(id, it, null) }
+    private fun normalizeId(id: String): String {
+        val trimmed = id.trim()
+        return when (trimmed.lowercase()) {
+            "default" -> "american"
+            else -> trimmed
+        }
     }
+
+    fun byId(id: String): Sound? {
+        val norm = normalizeId(id)
+        return builtIn.find { it.id == norm }
+            ?: customSounds[norm]?.let { Sound(norm, it, null) }
+    }
+
 
     fun registerCustomSound(id: String, title: String) {
         customSounds[id] = title

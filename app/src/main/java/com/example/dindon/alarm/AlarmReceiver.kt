@@ -33,7 +33,26 @@ class AlarmReceiver : BroadcastReceiver() {
                     putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
                     putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
                 }
-                context.startForegroundService(serviceIntent)
+                try {
+                    context.startForegroundService(serviceIntent)
+                } catch (t: Throwable) {
+                    // Фолбэк: если сервис нельзя стартовать из фона на этой прошивке —
+                    // поднимаем UI, и уже из Activity можно стартовать сервис безопаснее.
+                    val uiIntent = Intent(context, AlarmRingActivity::class.java).apply {
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        )
+                        putExtra(AlarmActions.EXTRA_ALARM_ID, alarmId)
+                        putExtra(AlarmActions.EXTRA_LABEL, label)
+                        putExtra(AlarmActions.EXTRA_SOUND_ID, soundId)
+                        putExtra(AlarmActions.EXTRA_VIBRATE, vibrate)
+                        putExtra(AlarmActions.EXTRA_SNOOZE_MIN, snoozeMin)
+                    }
+                    context.startActivity(uiIntent)
+                }
+
 
                 // 2) Перепланируем "основной" будильник (но НЕ snooze)
                 if (!isSnoozeTrigger && alarmId != -1) {
